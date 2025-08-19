@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import date
 import plotly.express as px
 import plotly.graph_objects as go
+from datetime import datetime
 from utils.finance import amortization_schedule, monthly_payment, human_currency
 
 st.set_page_config(page_title="Loan Calculator", layout="wide")
@@ -27,9 +26,6 @@ with st.form("loan_form"):
     rate = st.number_input("Annual Interest Rate (%)", min_value=0.0, value=7.5, step=0.1)
     years = st.slider("Duration (Years)", 1, 40, 20)
 
-    # ✅ Added start date picker
-    start_date = st.date_input("Loan Start Date", value=date.today())
-
     extra_payment = st.number_input("Extra Monthly Payment", min_value=0.0, value=0.0, step=100.0)
     lump_sum = st.number_input("One-time Lump Sum Payment", min_value=0.0, value=0.0, step=1000.0)
     insurance = st.checkbox("Add Insurance (0.5% annually)?", value=False)
@@ -42,11 +38,13 @@ if not submitted:
 
 # ---------------- Calculations ----------------
 insurance_rate = 0.005 if insurance else 0.0
+start_date = datetime.today()
+
 df = amortization_schedule(
     principal=principal,
     annual_rate=rate / 100.0,
     years=years,
-    periods_per_year=12,  # monthly compounding
+    periods_per_year=12,
     start_date=start_date,
     extra_payment=extra_payment,
     lump_sum=lump_sum,
@@ -76,55 +74,34 @@ elif page == "Amortization Table":
     )
 
 elif page == "Graphs":
-    st.header("📊 Interactive Loan Visualizations")
+    st.header("Interactive Graphs")
 
-    # --- 1. Balance Over Time ---
-    fig1 = px.line(df, x="date", y="balance", 
-                   title="Outstanding Balance Over Time",
-                   labels={"date": "Date", "balance": "Balance Amount"},
-                   markers=True)
-    fig1.update_traces(line=dict(color="royalblue", width=3))
+    # Balance over time
+    fig1 = px.line(df, x="date", y="balance", title="Outstanding Balance Over Time")
     st.plotly_chart(fig1, use_container_width=True)
 
-    # --- 2. Cumulative Principal vs Interest (Stacked Area) ---
+    # Cumulative Principal vs Interest
     df_cum = df.copy()
-    df_cum["principal_cum"] = df_cum["principal"].cumsum()
-    df_cum["interest_cum"] = df_cum["interest"].cumsum()
-
+    df_cum["cumulative_principal"] = df_cum["principal"].cumsum()
+    df_cum["cumulative_interest"] = df_cum["interest"].cumsum()
     fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=df_cum["date"], y=df_cum["principal_cum"],
-                              mode='lines', name="Principal Paid", stackgroup="one",
-                              line=dict(width=0.5), fillcolor="seagreen"))
-    fig2.add_trace(go.Scatter(x=df_cum["date"], y=df_cum["interest_cum"],
-                              mode='lines', name="Interest Paid", stackgroup="one",
-                              line=dict(width=0.5), fillcolor="tomato"))
-    fig2.update_layout(title="Cumulative Principal vs Interest",
-                       xaxis_title="Date", yaxis_title="Amount")
+    fig2.add_trace(go.Scatter(x=df_cum["date"], y=df_cum["cumulative_principal"], mode="lines", name="Principal"))
+    fig2.add_trace(go.Scatter(x=df_cum["date"], y=df_cum["cumulative_interest"], mode="lines", name="Interest"))
+    fig2.update_layout(title="Cumulative Principal vs Interest")
     st.plotly_chart(fig2, use_container_width=True)
 
-    # --- 3. Yearly Interest Payments (Bar Chart) ---
-    df_yearly = df.groupby(df["date"].dt.year).agg({"interest": "sum"}).reset_index()
-    fig3 = px.bar(df_yearly, x="date", y="interest", 
-                  title="Yearly Interest Payments",
-                  labels={"date": "Year", "interest": "Interest Paid"},
-                  text_auto=".2s",
-                  color="interest",
-                  color_continuous_scale="Oranges")
+    # Yearly Interest Payments
+    df_yearly = df.copy()
+    df_yearly["year"] = pd.to_datetime(df_yearly["date"]).dt.year
+    yearly_interest = df_yearly.groupby("year")["interest"].sum().reset_index()
+    fig3 = px.bar(yearly_interest, x="year", y="interest", title="Yearly Interest Payments")
     st.plotly_chart(fig3, use_container_width=True)
-
 
 elif page == "What-If Analysis":
     st.header("What-If Analysis")
     st.write("Compare scenarios with vs. without extra payments.")
 
-    # ✅ Pass periods_per_year & start_date here as well
-    base_df = amortization_schedule(
-        principal=principal,
-        annual_rate=rate / 100.0,
-        years=years,
-        periods_per_year=12,
-        start_date=start_date
-    )
+    base_df = amortization_schedule(principal, rate / 100.0, years, periods_per_year=12, start_date=start_date)
 
     months_saved = len(base_df) - len(df)
     interest_saved = base_df["interest"].sum() - df["interest"].sum()
